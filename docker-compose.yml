@@ -1,0 +1,79 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: whatsapp_ai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./supabase/migrations/0001_mvp.sql:/docker-entrypoint-initdb.d/0001_mvp.sql:ro
+      - ./supabase/migrations/0002_vector_and_settings.sql:/docker-entrypoint-initdb.d/0002_vector_and_settings.sql:ro
+      - ./supabase/migrations/0003_multibot_and_roles.sql:/docker-entrypoint-initdb.d/0003_multibot_and_roles.sql:ro
+      - ./supabase/migrations/0004_auth_and_verification.sql:/docker-entrypoint-initdb.d/0004_auth_and_verification.sql:ro
+      - ./supabase/migrations/0005_app_role_and_rls.sql:/docker-entrypoint-initdb.d/0005_app_role_and_rls.sql:ro
+      - ./supabase/migrations/0006_settings_per_bot.sql:/docker-entrypoint-initdb.d/0006_settings_per_bot.sql:ro
+      - ./supabase/migrations/0007_trials_and_pricing.sql:/docker-entrypoint-initdb.d/0007_trials_and_pricing.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d whatsapp_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    # Deliberadamente SIN --proxy-headers/--forwarded-allow-ips: eso delegaría en
+    # uvicorn la decisión de confiar en X-Forwarded-For, típicamente con un wildcard
+    # inseguro. La confianza en el proxy se decide explícitamente en get_client_ip()
+    # (net.py), con una lista concreta de redes confiables. Hoy el navegador le habla
+    # directo a esta API (ver NEXT_PUBLIC_API_URL del dashboard), así que en el
+    # desarrollo local ese header ni siquiera se usa.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./supabase:/workspace/supabase:ro
+      - ./apps/api/app:/app/app
+
+  worker:
+    build: ./apps/api
+    command: python -m app.worker
+    env_file: .env
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./apps/api/app:/app/app
+
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      # NEXT_PUBLIC_API_URL debe ser una URL que el NAVEGADOR pueda alcanzar (no el
+      # nombre del servicio Docker) — es lo que hace que el navegador le hable directo
+      # a la API en vez de rebotar por el proxy same-origin de next.config.js, que es
+      # lo que ocultaba la IP real del visitante detrás de la del contenedor.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://api:8000}
+    ports: ["3000:3000"]
+    depends_on: [api]
+    volumes:
+      - ./apps/dashboard/app:/app/app
+
+volumes:
+  postgres_data:

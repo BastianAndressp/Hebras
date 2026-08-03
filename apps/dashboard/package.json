@@ -1,0 +1,7 @@
+{
+  "name": "hebras-dashboard",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "lint": "tsc --noEmit" },
+  "dependencies": { "@supabase/supabase-js": "^2.49.4", "next": "^15.3.1", "react": "^19.1.0", "react-dom": "^19.1.0" },
+  "devDependencies": { "@types/node": "^22.15.2", "@types/react": "^19.1.2", "@types/react-dom": "^19.1.2", "typescript": "^5.8.3" }
+}

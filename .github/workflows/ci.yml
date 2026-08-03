@@ -1,0 +1,49 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: whatsapp_ai
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      JWT_SECRET: ci-only-jwt-secret-not-used-in-prod
+      APP_ENCRYPTION_KEY: B4asL8W-x3ZOUV80CKyWiWbPXFf25G03nR1YBCg4Egw=
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/whatsapp_ai
+      TENANT_DATABASE_URL: postgresql://app_user:app_user_change_me_in_prod@localhost:5432/whatsapp_ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Apply DB migrations
+        run: |
+          for f in $(ls "${{ github.workspace }}"/supabase/migrations/*.sql | sort); do
+            PGPASSWORD=postgres psql -h localhost -U postgres -d whatsapp_ai -f "$f"
+          done
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'pnpm', cache-dependency-path: apps/dashboard/pnpm-lock.yaml }
+      - run: corepack enable && pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run lint
+      - run: pnpm run build
