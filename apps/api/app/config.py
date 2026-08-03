@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     platform_admin_token: str | None = None
     # A dónde llegan los avisos de "un cliente pidió upgrade de plan" (cobro manual).
     platform_admin_email: str | None = None
+    # Si es true, la API corre el loop del worker (worker.py::listen) como tarea de
+    # fondo dentro del mismo proceso, en vez de esperar un servicio "worker" aparte.
+    # Pensado para plataformas donde un Background Worker separado cuesta extra (ej.
+    # Render, que no tiene plan gratuito para ese tipo de servicio) y el volumen de
+    # mensajes no justifica escalar la API y el worker por separado todavía.
+    run_worker_in_process: bool = False
 
 
 settings = Settings()

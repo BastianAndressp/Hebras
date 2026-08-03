@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 import time
@@ -10,6 +11,7 @@ from .config import settings
 from .db import connect, disconnect
 from .net import get_client_ip
 from .queue import redis_client
+from . import worker
 from .admin_router import router as admin_router
 from .auth_router import router as auth_router
 from .knowledge import router as knowledge_router
@@ -37,7 +39,13 @@ async def lifespan(_: FastAPI):
             "OPENROUTER_API_KEY no está configurada: el RAG usará embeddings pseudo-aleatorios "
             "(sin significado semántico real) en vez de embeddings reales."
         )
+    worker_task = None
+    if settings.run_worker_in_process:
+        log.info("RUN_WORKER_IN_PROCESS=true: arrancando el loop del worker como tarea de fondo")
+        worker_task = asyncio.create_task(worker.listen())
     yield
+    if worker_task:
+        worker_task.cancel()
     await disconnect()
 
 

@@ -97,27 +97,37 @@ async def process(payload: dict) -> None:
         raise
 
 
-async def run() -> None:
-    await connect()
+async def listen() -> None:
+    """Loop del worker, asumiendo que connect() ya corrió (pools de db.py ya están
+    inicializados). Separado de run() para poder correrse como tarea de fondo dentro
+    del mismo proceso de la API (ver main.py, RUN_WORKER_IN_PROCESS) sin pisar los
+    pools globales que la API ya está usando."""
     log.info("Worker started listening on Redis queue: %s", QUEUE_NAME)
     redis = await redis_client()
+    while True:
+        item = await redis.brpop(QUEUE_NAME, timeout=5)
+        if item:
+            _, raw = item
+            payload = json.loads(raw)
+            log.info("Dequeued message from Redis: %s", payload.get("meta_message_id"))
+            try:
+                await process(payload)
+            except Exception:
+                retries = int(payload.get("retries", 0))
+                if retries < 3:
+                    payload["retries"] = retries + 1
+                    await asyncio.sleep(2 ** retries)
+                    await redis.lpush(QUEUE_NAME, json.dumps(payload, default=str))
+                else:
+                    log.exception("Message permanently failed", extra={"message_id": payload.get("meta_message_id")})
+
+
+async def run() -> None:
+    """Punto de entrada para el worker como proceso standalone (docker-compose local,
+    o un Background Worker separado en Render)."""
+    await connect()
     try:
-        while True:
-            item = await redis.brpop(QUEUE_NAME, timeout=5)
-            if item:
-                _, raw = item
-                payload = json.loads(raw)
-                log.info("Dequeued message from Redis: %s", payload.get("meta_message_id"))
-                try:
-                    await process(payload)
-                except Exception:
-                    retries = int(payload.get("retries", 0))
-                    if retries < 3:
-                        payload["retries"] = retries + 1
-                        await asyncio.sleep(2 ** retries)
-                        await redis.lpush(QUEUE_NAME, json.dumps(payload, default=str))
-                    else:
-                        log.exception("Message permanently failed", extra={"message_id": payload.get("meta_message_id")})
+        await listen()
     finally:
         await disconnect()
 
