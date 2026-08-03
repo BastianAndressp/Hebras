@@ -16,6 +16,7 @@ services:
       - ./supabase/migrations/0006_settings_per_bot.sql:/docker-entrypoint-initdb.d/0006_settings_per_bot.sql:ro
       - ./supabase/migrations/0007_trials_and_pricing.sql:/docker-entrypoint-initdb.d/0007_trials_and_pricing.sql:ro
       - ./supabase/migrations/0008_no_force_rls_for_owner.sql:/docker-entrypoint-initdb.d/0008_no_force_rls_for_owner.sql:ro
+      - ./supabase/migrations/0009_per_tenant_webhook_secrets.sql:/docker-entrypoint-initdb.d/0009_per_tenant_webhook_secrets.sql:ro
 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d whatsapp_ai"]

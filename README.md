@@ -27,7 +27,7 @@ Hebras es una plataforma SaaS multi-tenant de asistentes de IA para WhatsApp. In
 ## Diseño operativo
 
 - `GET /webhooks/whatsapp`: verificación challenge de Meta.
-- `POST /webhooks/whatsapp`: exige `WHATSAPP_APP_SECRET` configurado y firma `X-Hub-Signature-256` válida (responde 503/403 si no); deduplica y encola, nunca espera al LLM.
+- `POST /webhooks/whatsapp`: exige firma `X-Hub-Signature-256` válida (responde 503/403 si no); deduplica y encola, nunca espera al LLM. La firma se valida con el **Meta App Secret de la empresa dueña del número** (cargado desde el dashboard, pestaña "API Keys / OpenRouter"), no con una variable de entorno global — cada empresa trae su propia app de Meta. `WHATSAPP_APP_SECRET` en `.env` solo queda como fallback para un despliegue de un solo tenant / demo.
 - El worker usa el `phone_number_id` de cada mensaje para resolver el bot dueño; si no hay match, el mensaje se descarta (nunca se enruta al bot de otra empresa).
 - Las derivaciones a humano se marcan en el inbox y se notifican por email cuando se configura Brevo.
 
@@ -56,7 +56,7 @@ Una empresa puede tener varios bots, cada uno con su propio número de WhatsApp 
 - **Secretos obligatorios**: `JWT_SECRET`, `APP_ENCRYPTION_KEY` y `TENANT_DATABASE_URL` deben estar configurados o la app no arranca (antes, un `JWT_SECRET` vacío desactivaba silenciosamente la verificación de firma de los tokens).
 - **Row Level Security real**: las rutas autenticadas del dashboard se conectan a Postgres con el rol `app_user` (creado en la migración `0005_app_role_and_rls.sql`), que no tiene `BYPASSRLS`. Esto hace que el aislamiento por `company_id` sea una barrera de base de datos, no solo un `where` en cada query. Antes de producción: `ALTER ROLE app_user PASSWORD '...'` con un valor fuerte y actualizar `TENANT_DATABASE_URL` en el entorno del backend (el valor por defecto en `.env.example` es solo para desarrollo).
 - **`api_keys` cifradas en reposo**: los tokens de WhatsApp/OpenRouter que cada empresa carga desde el dashboard se cifran con Fernet (`APP_ENCRYPTION_KEY`) antes de guardarse.
-- **Webhook de Meta**: rechaza cualquier request sin `WHATSAPP_APP_SECRET` configurado o sin firma válida — ya no acepta payloads sin verificar por omisión.
+- **Webhook de Meta**: rechaza cualquier request sin un Meta App Secret configurado (de la empresa dueña del número, o el global de `.env` como fallback) o sin firma válida — ya no acepta payloads sin verificar por omisión. El verify token del handshake `GET` también es por empresa: se autogenera y se ve en la pestaña "WhatsApp Meta" del dashboard (`GET /v1/webhook-info`), con `WEBHOOK_VERIFY_TOKEN` de `.env` como fallback global.
 - **Rate limiting**: respaldado en Redis (no en memoria del proceso), por IP y por tenant, para funcionar correctamente con varias réplicas de `api`.
 - **IP real del cliente**: el navegador le habla directo a la API (`NEXT_PUBLIC_API_URL` se hornea en el build del dashboard, ver `docker-compose.yml`), no a través del proxy same-origin de Next.js — antes todo el tráfico se veía como la IP del contenedor del dashboard. Si en producción se pone un reverse proxy real delante, hay que declarar sus redes en `TRUSTED_PROXY_NETWORKS` para que `X-Forwarded-For` se respete (por defecto no se confía en ese header desde ningún origen).
 

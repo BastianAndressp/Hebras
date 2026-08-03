@@ -1,4 +1,5 @@
 import json
+import secrets
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from .auth import Principal, require_owner, require_principal, require_write_access
@@ -23,7 +24,7 @@ from .schemas import (
     SettingsUpdate,
     SubscriptionUpdate,
 )
-from .crypto import encrypt_secret
+from .crypto import decrypt_secret, encrypt_secret
 from .services import enforce_whatsapp_trial_claim, get_tenant_api_keys, notify_platform_admin, save_message, send_whatsapp
 
 router = APIRouter(prefix="/v1", tags=["dashboard"])
@@ -398,13 +399,25 @@ async def read_api_keys(principal: Principal = Depends(require_principal)):
 
 @router.get("/webhook-info")
 async def read_webhook_info(principal: Principal = Depends(require_principal)):
-    """Datos que el dueño necesita pegar en Meta for Developers al configurar el
-    webhook: la ruta (se combina con el dominio público en el frontend, ya que el
-    backend no conoce el dominio con el que Meta le habla) y el verify token
-    (settings.webhook_verify_token, compartido por toda la plataforma, no por tenant)."""
+    """Datos que el dueño necesita pegar en Meta for Developers al configurar SU propio
+    webhook: la ruta (se combina con el dominio público en el frontend, ya que el backend
+    no conoce el dominio con el que Meta le habla) y un verify token propio de esta
+    empresa (no uno global de la plataforma -- cada empresa trae su propia app de Meta).
+    Se autogenera la primera vez que se pide, para que el dueño no tenga que inventar ni
+    escribir nada."""
+    async with tenant_conn(principal.company_id) as conn:
+        row = await conn.fetchrow("select whatsapp_verify_token from api_keys where company_id=$1", principal.company_id)
+        token = decrypt_secret(row["whatsapp_verify_token"]) if row else None
+        if not token:
+            token = secrets.token_urlsafe(24)
+            await conn.execute(
+                """insert into api_keys(company_id, whatsapp_verify_token) values($1,$2)
+                   on conflict(company_id) do update set whatsapp_verify_token=excluded.whatsapp_verify_token""",
+                principal.company_id, encrypt_secret(token),
+            )
     return {
         "webhook_path": "/webhooks/whatsapp",
-        "verify_token": settings.webhook_verify_token,
+        "verify_token": token,
     }
 
 
