@@ -313,6 +313,17 @@ export default function Dashboard() {
     setBootstrapping(false);
   }, []);
 
+  // Mientras el Inbox está abierto, refresca las conversaciones cada pocos segundos —
+  // los mensajes de WhatsApp llegan de forma asíncrona (webhook -> worker -> DB), así que
+  // sin esto el usuario solo los veía al refrescar la página a mano.
+  useEffect(() => {
+    if (tab !== "inbox" || !token) return;
+    const interval = setInterval(() => {
+      api("/conversations", token).then(setConversations).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [tab, token]);
+
   const parseResponseJson = async (res: Response) => {
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
