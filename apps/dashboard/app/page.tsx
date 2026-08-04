@@ -300,6 +300,15 @@ export default function Dashboard() {
     }
   };
 
+  // "Despierta" la API apenas se carga el dashboard, incluso antes de saber si hay
+  // sesión guardada -- en un plan gratuito de Render, el servicio se duerme tras ~15
+  // min sin tráfico y la primera request tarda en responder o falla. Disparar esto en
+  // paralelo (sin esperarlo) le da tiempo a levantar mientras el usuario todavía está
+  // mirando la pantalla de login.
+  useEffect(() => {
+    fetch(`${API}/health`).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const saved = localStorage.getItem("whatsapp-ai-token");
     if (saved) {
