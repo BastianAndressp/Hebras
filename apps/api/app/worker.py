@@ -75,16 +75,28 @@ async def process(payload: dict) -> None:
         # al menos un servicio -- evita gastar tokens de más en el prompt de bots que no
         # usan la función de citas.
         active_services = await list_active_services(conn, bot["id"])
+        ai_handoff_phrase = await conn.fetchval("select ai_handoff_phrase from handoff_rules where bot_id=$1", bot["id"])
+
+    def _sanitize_content(direction: str, content: str) -> str:
+        # Si una respuesta anterior del BOT contiene la frase de derivación, se la
+        # ocultamos al modelo en su propio historial. Sin esto, el modelo veía su
+        # propia respuesta pasada con esa frase y tendía a repetirla en el siguiente
+        # turno -- incluso después de que el dueño reactivara manualmente el modo IA
+        # desde el dashboard -- volviendo a derivar la conversación sin que el cliente
+        # hubiera pedido nada nuevo.
+        if direction == "outbound" and ai_handoff_phrase and ai_handoff_phrase.lower() in content.lower():
+            return "Te derivé con un miembro del equipo."
+        return content
 
     recent_history = list(reversed(history_rows))
     if len(recent_history) > 6:
         older = recent_history[:-6]
-        summary_snippets = [f"{'Cliente' if m['direction']=='inbound' else 'Bot'}: {m['content'][:60]}" for m in older]
+        summary_snippets = [f"{'Cliente' if m['direction']=='inbound' else 'Bot'}: {_sanitize_content(m['direction'], m['content'])[:60]}" for m in older]
         summary_text = "Resumen de mensajes anteriores: " + " | ".join(summary_snippets)
         messages = [{"role": "system", "content": summary_text}]
-        messages.extend([{"role": "assistant" if m["direction"] == "outbound" else "user", "content": m["content"]} for m in recent_history[-6:]])
+        messages.extend([{"role": "assistant" if m["direction"] == "outbound" else "user", "content": _sanitize_content(m["direction"], m["content"])} for m in recent_history[-6:]])
     else:
-        messages = [{"role": "assistant" if m["direction"] == "outbound" else "user", "content": m["content"]} for m in recent_history]
+        messages = [{"role": "assistant" if m["direction"] == "outbound" else "user", "content": _sanitize_content(m["direction"], m["content"])} for m in recent_history]
 
     async def tool_executor(name: str, args: dict) -> dict:
         """Nunca lanza: cualquier error se devuelve como {"error": ...} para que el
@@ -139,10 +151,8 @@ async def process(payload: dict) -> None:
             # esto detecta cuando la propia respuesta de la IA anuncia que deriva a un
             # humano (frase configurable por bot en handoff_rules.ai_handoff_phrase), y
             # recién ahí -- después de generar y mandar esa respuesta -- marca la
-            # conversación como handoff.
-            ai_handoff_phrase = await conn.fetchval(
-                "select ai_handoff_phrase from handoff_rules where bot_id=$1", bot["id"]
-            )
+            # conversación como handoff. ai_handoff_phrase ya se cargó más arriba, junto
+            # con el resto del setup, para poder sanitizar el historial también.
             if ai_handoff_phrase and ai_handoff_phrase.lower() in reply.lower():
                 log.info("AI reply matched ai_handoff_phrase, marking conversation_id=%s as handoff", conversation["id"])
                 await conn.execute("update conversations set status='handoff', last_message_at=now() where id=$1", conversation["id"])
