@@ -138,7 +138,7 @@ export default function BotConfigTab({
             >
               <option value="deepseek/deepseek-chat">DeepSeek V3 (Económico / Rápido)</option>
               <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 72B (Alta precisión)</option>
-              <option value="moonshotai/kimi-k1.5">Kimi k1.5 (Contexto largo)</option>
+              <option value="moonshotai/kimi-k3">Kimi K3 (Contexto largo)</option>
               <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
             </select>
           </div>
