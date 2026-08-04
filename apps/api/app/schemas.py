@@ -23,6 +23,7 @@ class HandoffRuleUpdate(BaseModel):
 
 class BotResponse(BotUpdate):
     id: UUID
+    company_id: UUID
     phone_number_id: str
     status: str
 
