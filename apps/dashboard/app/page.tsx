@@ -16,6 +16,7 @@ import BillingTab from "./components/BillingTab";
 import WhatsAppTab from "./components/WhatsAppTab";
 import ApiKeysTab from "./components/ApiKeysTab";
 import HoursTab from "./components/HoursTab";
+import AppointmentsTab from "./components/AppointmentsTab";
 import HandoffTab from "./components/HandoffTab";
 import LogsTab from "./components/LogsTab";
 import NotificationsTab from "./components/NotificationsTab";
@@ -179,6 +180,8 @@ export default function Dashboard() {
     monthly_spending_limit_usd: 100,
     default_language: "es",
   });
+  const [services, setServices] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [apiKeysState, setApiKeysState] = useState<ApiKeysState>({
     has_whatsapp_access_token: false,
     has_whatsapp_app_secret: false,
@@ -209,7 +212,7 @@ export default function Dashboard() {
       const activeBotId = botId || botsList[0]?.id || "";
       setSelectedBotId(activeBotId);
       const botQuery = activeBotId ? `?bot_id=${activeBotId}` : "";
-      const [b, r, m, c, d, bl, a, t, st, ak, n, wh] = await Promise.all([
+      const [b, r, m, c, d, bl, a, t, st, ak, n, wh, sv, ap] = await Promise.all([
         api(`/bot${botQuery}`, jwt),
         api(`/handoff-rule${botQuery}`, jwt),
         api("/metrics", jwt),
@@ -222,6 +225,8 @@ export default function Dashboard() {
         api("/api-keys", jwt).catch(() => null),
         api("/notifications", jwt).catch(() => []),
         api("/webhook-info", jwt).catch(() => null),
+        api(`/services${botQuery}`, jwt).catch(() => []),
+        api(`/appointments${botQuery}`, jwt).catch(() => []),
       ]);
       setBot(b);
       setRule(r);
@@ -234,6 +239,8 @@ export default function Dashboard() {
       if (st) setSettingsData(st);
       if (ak) setApiKeysState(ak);
       setNotifications(n);
+      setServices(sv);
+      setAppointments(ap);
       if (wh) {
         // API es NEXT_PUBLIC_API_URL (horneada en el build, ver docker-compose.yml). El
         // webhook de Meta le habla directo a la API, nunca a través del proxy /api del
@@ -529,6 +536,39 @@ export default function Dashboard() {
         body: JSON.stringify(settingsData),
       });
       setSettingsData(updated);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const createService = async (service: { name: string; duration_minutes: number; price: number | null; active: boolean }) => {
+    try {
+      const created = await api(`/services?bot_id=${selectedBotId}`, token, {
+        method: "POST",
+        body: JSON.stringify(service),
+      });
+      setServices((prev) => [...prev, created]);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const updateService = async (id: string, service: { name: string; duration_minutes: number; price: number | null; active: boolean }) => {
+    try {
+      const updated = await api(`/services/${id}?bot_id=${selectedBotId}`, token, {
+        method: "PUT",
+        body: JSON.stringify(service),
+      });
+      setServices((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const cancelAppointment = async (id: string) => {
+    try {
+      const updated = await api(`/appointments/${id}/cancel?bot_id=${selectedBotId}`, token, { method: "PATCH" });
+      setAppointments((prev) => prev.map((a) => (a.id === id ? updated : a)));
     } catch (e: any) {
       setError(e.message);
     }
@@ -1097,6 +1137,16 @@ export default function Dashboard() {
           settingsData={settingsData}
           setSettingsData={setSettingsData}
           onSave={saveSettings}
+        />
+      )}
+
+      {tab === "citas" && (
+        <AppointmentsTab
+          services={services}
+          appointments={appointments}
+          onCreateService={createService}
+          onUpdateService={updateService}
+          onCancelAppointment={cancelAppointment}
         />
       )}
 

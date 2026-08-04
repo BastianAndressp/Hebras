@@ -9,10 +9,19 @@ _pool: asyncpg.Pool | None = None
 _tenant_pool: asyncpg.Pool | None = None
 
 
+async def _init_connection(conn: asyncpg.Connection) -> None:
+    """Sin esto, asyncpg NO decodifica columnas jsonb/json a dict/list de Python -- las
+    devuelve como texto crudo. Eso hacía que check_business_hours (isinstance(bh, dict))
+    fallara en silencio siempre que business_hours_enabled estuviera activo, sin ningún
+    error visible: la comparación de horario simplemente nunca se ejecutaba."""
+    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text")
+    await conn.set_type_codec("json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text")
+
+
 async def connect() -> None:
     global _pool, _tenant_pool
-    _pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=10)
-    _tenant_pool = await asyncpg.create_pool(settings.tenant_database_url, min_size=1, max_size=10)
+    _pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=10, init=_init_connection)
+    _tenant_pool = await asyncpg.create_pool(settings.tenant_database_url, min_size=1, max_size=10, init=_init_connection)
 
 
 async def disconnect() -> None:

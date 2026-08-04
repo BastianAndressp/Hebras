@@ -51,6 +51,17 @@ Hebras es una plataforma SaaS multi-tenant de asistentes de IA para WhatsApp. In
 
 Una empresa puede tener varios bots, cada uno con su propio número de WhatsApp (`phone_number_id`), prompt, base de conocimiento (RAG) y horarios de atención. Se gestionan desde la pestaña "Config IA" del dashboard (crear, cambiar entre bots con el selector del header, eliminar — no se puede eliminar el único bot de la empresa) o vía API: `GET/POST /v1/bots`, `DELETE /v1/bots/{id}`. Los endpoints por-bot (`/v1/bot`, `/v1/handoff-rule`, `/v1/settings`, `/v1/knowledge/*`) aceptan un query param `?bot_id=` opcional; sin él, caen al primer bot creado (compatibilidad con empresas de un solo bot).
 
+## Citas
+
+El bot puede agendar citas dentro de la conversación de WhatsApp, sin menú rígido — el cliente pide hora, el bot chequea disponibilidad real y confirma. Para activarlo:
+
+1. En el dashboard, pestaña **"Citas"**, agrega al menos un servicio (nombre, duración en minutos, precio opcional). Sin servicios activos, el bot conversa normal pero nunca intenta agendar nada.
+2. Configura el horario de atención en la pestaña **"Horarios"** (usa el mismo `settings.business_hours` de siempre — no hay una configuración de disponibilidad separada). Con `business_hours_enabled` apagado, el bot puede agendar a cualquier hora.
+3. El bot decide solo cuándo ofrecer una hora y cuándo confirmar la reserva (tool-calling estándar de OpenAI/OpenRouter — `check_availability` y `book_appointment`, ver `apps/api/app/booking.py`). Valida que el horario pedido caiga dentro del horario configurado y no choque con otra cita ya agendada del mismo bot.
+4. Las citas quedan visibles (y se pueden cancelar manualmente) en la misma pestaña "Citas" del dashboard.
+
+**v1 = solo crear citas.** Cancelar o reagendar por WhatsApp todavía no existe — se maneja desde el dashboard o por teléfono. No hay integración con Google Calendar ni ningún calendario externo.
+
 ## Seguridad
 
 - **Secretos obligatorios**: `JWT_SECRET`, `APP_ENCRYPTION_KEY` y `TENANT_DATABASE_URL` deben estar configurados o la app no arranca (antes, un `JWT_SECRET` vacío desactivaba silenciosamente la verificación de firma de los tokens).

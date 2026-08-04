@@ -9,6 +9,7 @@ from .db import pool, tenant_conn
 from .schemas import (
     ApiKeysResponse,
     ApiKeysUpdate,
+    AppointmentResponse,
     AuditLogResponse,
     BillingOverviewResponse,
     BotCreate,
@@ -20,6 +21,9 @@ from .schemas import (
     HandoffRuleUpdate,
     NotificationResponse,
     PlanResponse,
+    ServiceCreate,
+    ServiceResponse,
+    ServiceUpdate,
     SettingsResponse,
     SettingsUpdate,
     SubscriptionUpdate,
@@ -382,7 +386,7 @@ async def update_settings(payload: SettingsUpdate, bot_id: str | None = Query(de
                  updated_at=now()
                returning *""",
             principal.company_id, bot["id"], payload.business_hours_enabled,
-            json.dumps(payload.business_hours), payload.out_of_hours_message,
+            payload.business_hours, payload.out_of_hours_message,
             payload.monthly_spending_limit_usd, payload.default_language
         )
         await conn.execute("insert into audit_logs(company_id, actor_id, action) values($1,$2,'settings.updated')", principal.company_id, principal.user_id)
@@ -391,6 +395,72 @@ async def update_settings(payload: SettingsUpdate, bot_id: str | None = Query(de
         res["business_hours"] = json.loads(res["business_hours"])
     return res
 
+
+@router.get("/services", response_model=list[ServiceResponse])
+async def list_services(bot_id: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
+    async with tenant_conn(principal.company_id) as conn:
+        bot = await get_bot(conn, principal.company_id, bot_id)
+        rows = await conn.fetch("select * from services where bot_id=$1 order by name", bot["id"])
+    return [dict(r) for r in rows]
+
+
+@router.post("/services", response_model=ServiceResponse, status_code=201)
+async def create_service(payload: ServiceCreate, bot_id: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
+    require_owner(principal)
+    async with tenant_conn(principal.company_id) as conn:
+        bot = await get_bot(conn, principal.company_id, bot_id)
+        row = await conn.fetchrow(
+            """insert into services(company_id, bot_id, name, duration_minutes, price, active)
+               values($1,$2,$3,$4,$5,$6) returning *""",
+            principal.company_id, bot["id"], payload.name, payload.duration_minutes, payload.price, payload.active,
+        )
+    return dict(row)
+
+
+@router.put("/services/{service_id}", response_model=ServiceResponse)
+async def update_service(service_id: str, payload: ServiceUpdate, bot_id: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
+    require_owner(principal)
+    async with tenant_conn(principal.company_id) as conn:
+        bot = await get_bot(conn, principal.company_id, bot_id)
+        row = await conn.fetchrow(
+            """update services set name=$1, duration_minutes=$2, price=$3, active=$4, updated_at=now()
+               where id=$5 and bot_id=$6 returning *""",
+            payload.name, payload.duration_minutes, payload.price, payload.active, service_id, bot["id"],
+        )
+        if not row:
+            raise HTTPException(404, "Servicio no encontrado")
+    return dict(row)
+
+
+@router.get("/appointments", response_model=list[AppointmentResponse])
+async def list_appointments(bot_id: str | None = Query(default=None), status: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
+    async with tenant_conn(principal.company_id) as conn:
+        bot = await get_bot(conn, principal.company_id, bot_id)
+        if status:
+            rows = await conn.fetch(
+                "select * from appointments where bot_id=$1 and status=$2 order by scheduled_start desc limit 100",
+                bot["id"], status,
+            )
+        else:
+            rows = await conn.fetch(
+                "select * from appointments where bot_id=$1 order by scheduled_start desc limit 100", bot["id"]
+            )
+    return [dict(r) for r in rows]
+
+
+@router.patch("/appointments/{appointment_id}/cancel", response_model=AppointmentResponse)
+async def cancel_appointment(appointment_id: str, bot_id: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
+    require_write_access(principal)
+    async with tenant_conn(principal.company_id) as conn:
+        bot = await get_bot(conn, principal.company_id, bot_id)
+        row = await conn.fetchrow(
+            """update appointments set status='canceled', updated_at=now()
+               where id=$1 and bot_id=$2 returning *""",
+            appointment_id, bot["id"],
+        )
+        if not row:
+            raise HTTPException(404, "Cita no encontrada")
+    return dict(row)
 
 
 @router.get("/api-keys", response_model=ApiKeysResponse)

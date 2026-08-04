@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import sys
+from .booking import (BOOKING_TOOLS, InvalidBookingRequestError, SlotUnavailableError, book_appointment,
+                       check_slot_available, get_service_by_name, list_active_services, parse_local_datetime)
 from .db import connect, disconnect, pool
 from .queue import QUEUE_NAME, redis_client
 from .services import (build_knowledge_context, check_business_hours, get_current_usage_count,
@@ -69,7 +71,11 @@ async def process(payload: dict) -> None:
 
         knowledge_context = await build_knowledge_context(conn, bot["id"], payload["text"])
         history_rows = await conn.fetch("select direction, content from messages where conversation_id=$1 order by created_at desc limit 12", conversation["id"])
-    
+        # Solo se le ofrecen las tools de agendamiento al modelo si el negocio configuró
+        # al menos un servicio -- evita gastar tokens de más en el prompt de bots que no
+        # usan la función de citas.
+        active_services = await list_active_services(conn, bot["id"])
+
     recent_history = list(reversed(history_rows))
     if len(recent_history) > 6:
         older = recent_history[:-6]
@@ -80,9 +86,46 @@ async def process(payload: dict) -> None:
     else:
         messages = [{"role": "assistant" if m["direction"] == "outbound" else "user", "content": m["content"]} for m in recent_history]
 
+    async def tool_executor(name: str, args: dict) -> dict:
+        """Nunca lanza: cualquier error se devuelve como {"error": ...} para que el
+        modelo lo vea como resultado de la tool y responda en lenguaje natural. Reabre
+        su propia conexión por llamada, igual que el guardado del mensaje saliente más
+        abajo -- el conn original ya se liberó para este punto del flujo."""
+        try:
+            async with pool().acquire() as tconn:
+                setting = await tconn.fetchrow("select * from settings where bot_id=$1", bot["id"])
+                service = await get_service_by_name(tconn, bot["id"], args.get("service_name", ""))
+                if not service:
+                    available = ", ".join(s["name"] for s in active_services) or "ninguno configurado"
+                    return {"error": f"No encontramos ese servicio. Servicios disponibles: {available}."}
+                requested = parse_local_datetime(setting, args.get("date", ""), args.get("time", ""))
+
+                if name == "check_availability":
+                    ok, reason = await check_slot_available(tconn, bot, setting, service, requested)
+                    return {"available": ok} if ok else {"available": False, "reason": reason}
+
+                if name == "book_appointment":
+                    customer_name = args.get("customer_name") or "Cliente"
+                    appt = await book_appointment(
+                        tconn, bot, setting, service, customer_name, payload["contact_phone"],
+                        requested, conversation["id"],
+                    )
+                    return {"booked": True, "service": service["name"], "start": appt["scheduled_start"].isoformat()}
+
+                return {"error": f"Herramienta desconocida: {name}"}
+        except (SlotUnavailableError, InvalidBookingRequestError) as exc:
+            return {"error": str(exc)}
+        except Exception:
+            log.exception("Tool execution failed: name=%s args=%s", name, args)
+            return {"error": "Ocurrió un problema interno al procesar la solicitud."}
+
     try:
         log.info("Generating reply via OpenRouter for model=%s...", bot["model"])
-        reply, tokens, cost = await generate_reply(bot, messages, knowledge_context=knowledge_context, custom_api_key=or_key)
+        reply, tokens, cost = await generate_reply(
+            bot, messages, knowledge_context=knowledge_context, custom_api_key=or_key,
+            tools=BOOKING_TOOLS if active_services else None,
+            tool_executor=tool_executor if active_services else None,
+        )
         log.info("Generated reply: '%s' (%d tokens)", reply, tokens)
         out_phone_id = payload.get("phone_number_id") or bot["phone_number_id"]
         await send_whatsapp(out_phone_id, payload["contact_phone"], reply, custom_access_token=wa_token)

@@ -205,3 +205,29 @@ class AuthTokenResponse(BaseModel):
     role: str = "owner"
 
 
+class ServiceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    duration_minutes: int = Field(gt=0, le=480)
+    price: float | None = Field(default=None, ge=0)
+    active: bool = True
+
+
+class ServiceUpdate(ServiceCreate):
+    pass
+
+
+class ServiceResponse(ServiceCreate):
+    id: UUID
+
+
+class AppointmentResponse(BaseModel):
+    id: UUID
+    service_id: UUID
+    customer_name: str
+    customer_phone: str
+    scheduled_start: datetime
+    scheduled_end: datetime
+    status: str
+    created_at: datetime
+
+

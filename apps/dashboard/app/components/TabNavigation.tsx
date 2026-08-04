@@ -17,6 +17,7 @@ export const TAB_LIST: [string, string][] = [
   ["whatsapp", "WhatsApp Meta"],
   ["apikeys", "API Keys / OpenRouter"],
   ["horarios", "Horarios"],
+  ["citas", "Citas"],
   ["derivacion", "Derivación"],
   ["logs", "Logs"],
   ["notificaciones", "Notificaciones"],

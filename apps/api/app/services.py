@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import httpx
 from .config import settings
 from .crypto import decrypt_secret
@@ -20,18 +21,50 @@ def is_placeholder_number(phone_number_id: str | None) -> bool:
     return not phone_number_id or phone_number_id.startswith(PLACEHOLDER_PHONE_PREFIX)
 
 
+def get_business_hours(setting) -> dict:
+    """settings.business_hours como dict, tolerando que la conexión usada no tenga
+    registrado el codec de jsonb (ver db.py::_init_connection, solo se registra en los
+    pools de app.db.connect() -- una conexión de test u otro script que abra su propia
+    conexión sin pasar por ahí recibiría la columna como texto crudo, no como dict)."""
+    if not setting:
+        return {}
+    bh = setting["business_hours"]
+    if isinstance(bh, str):
+        try:
+            bh = json.loads(bh)
+        except (TypeError, ValueError):
+            return {}
+    return bh if isinstance(bh, dict) else {}
+
+
+def get_local_now(setting) -> datetime:
+    """Hora actual en el timezone configurado del bot (settings.business_hours.timezone).
+    Antes, check_business_hours comparaba datetime.now(timezone.utc) directo contra el
+    horario configurado sin aplicar nunca el timezone guardado -- silenciosamente
+    trataba todo como UTC aunque el bot dijera "America/Santiago". Toda lógica que
+    necesite "ahora", "qué día es", o validar un horario de cita debe pasar por acá."""
+    tz_name = get_business_hours(setting).get("timezone") or "UTC"
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now(ZoneInfo("UTC"))
+
+
+DAY_MAP = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+
+
 async def check_business_hours(conn, bot_id: str) -> tuple[bool, str]:
     """Retorna (is_out_of_hours, out_of_hours_message)."""
     setting = await conn.fetchrow("select * from settings where bot_id=$1", bot_id)
     if not setting or not setting["business_hours_enabled"]:
         return False, ""
-    
-    bh = setting["business_hours"]
-    if not isinstance(bh, dict) or "schedule" not in bh:
+
+    bh = get_business_hours(setting)
+    if "schedule" not in bh:
         return False, ""
-    
-    now = datetime.now(timezone.utc)
-    day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+
+    now = get_local_now(setting)
+    day_map = DAY_MAP
     day_key = day_map.get(now.weekday())
     day_config = bh.get("schedule", {}).get(day_key, {})
     
@@ -105,33 +138,79 @@ async def get_tenant_api_keys(conn, company_id: str):
     }
 
 
-async def generate_reply(bot, history: list[dict], knowledge_context: str = "", custom_api_key: str | None = None) -> tuple[str, int, float]:
+async def generate_reply(
+    bot,
+    history: list[dict],
+    knowledge_context: str = "",
+    custom_api_key: str | None = None,
+    tools: list[dict] | None = None,
+    tool_executor=None,
+    max_tool_rounds: int = 3,
+) -> tuple[str, int, float]:
+    """tool_executor, si se pasa, es un callable async (name: str, args: dict) -> dict
+    que NUNCA debe lanzar excepción: cualquier error de la tool (horario no disponible,
+    servicio inexistente, etc.) debe volver como {"error": "..."} para que el modelo lo
+    vea como resultado de la tool y responda en lenguaje natural, en vez de romper el
+    turno completo del worker."""
     api_key = custom_api_key or settings.openrouter_api_key
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    messages: list[dict] = [{"role": "system", "content": bot["system_prompt"]}]
+    if knowledge_context:
+        messages.append({"role": "system", "content": f"Base de conocimiento relevante:\n{knowledge_context}"})
+    messages.extend(history)
+
     async def call(model: str):
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        messages = [{"role": "system", "content": bot["system_prompt"]}]
-        if knowledge_context:
-            messages.append({"role": "system", "content": f"Base de conocimiento relevante:\n{knowledge_context}"})
-        messages.extend(history)
         body = {
             "model": model,
             "messages": messages,
             "temperature": float(bot["temperature"]),
             "max_tokens": int(bot["max_tokens"]),
         }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(f"{settings.openrouter_base_url}/chat/completions", headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
         usage = data.get("usage", {})
-        return data["choices"][0]["message"]["content"].strip(), int(usage.get("total_tokens", 0)), 0.0
+        return data["choices"][0]["message"], int(usage.get("total_tokens", 0))
 
     try:
-        return await call(bot["model"])
+        message, tokens = await call(bot["model"])
+        model = bot["model"]
     except httpx.HTTPError:
         if bot["fallback_model"]:
-            return await call(bot["fallback_model"])
-        raise
+            message, tokens = await call(bot["fallback_model"])
+            model = bot["fallback_model"]
+        else:
+            raise
+
+    total_tokens = tokens
+    rounds = 1
+    while message.get("tool_calls") and tool_executor and rounds < max_tool_rounds:
+        messages.append(message)
+        for tool_call in message["tool_calls"]:
+            try:
+                args = json.loads(tool_call["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = await tool_executor(tool_call["function"]["name"], args)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps(result, default=str),
+            })
+        message, tokens = await call(model)
+        total_tokens += tokens
+        rounds += 1
+
+    if message.get("tool_calls") and not message.get("content"):
+        # Se agotaron las rondas de tools sin que el modelo devolviera texto final --
+        # evita mandarle al cliente una respuesta vacía por WhatsApp.
+        return "Dame un momento, estoy verificando la disponibilidad.", total_tokens, 0.0
+    return (message.get("content") or "").strip(), total_tokens, 0.0
 
 
 async def send_whatsapp(phone_number_id: str, recipient: str, text: str, custom_access_token: str | None = None, conn = None) -> None:

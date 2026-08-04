@@ -149,7 +149,7 @@ async def receive_webhook(request: Request, x_hub_signature_256: str | None = He
             inserted = await conn.fetchval(
                 """insert into webhook_events (meta_message_id, payload) values ($1, $2::jsonb)
                    on conflict (meta_message_id) do nothing returning meta_message_id""",
-                message["meta_message_id"], json.dumps(message),
+                message["meta_message_id"], message,
             )
             if inserted:
                 await enqueue(message)
