@@ -1092,7 +1092,7 @@ export default function Dashboard() {
       )}
 
       {tab === "derivacion" && rule && (
-        <HandoffTab rule={rule} setRule={setRule} onSave={saveRule} />
+        <HandoffTab key={selectedBotId} rule={rule} setRule={setRule} onSave={saveRule} />
       )}
 
       {tab === "logs" && <LogsTab auditLogs={auditLogs} />}
@@ -1106,6 +1106,7 @@ export default function Dashboard() {
           companyId={bot?.company_id || ""}
           settingsData={settingsData}
           setSettingsData={setSettingsData}
+          onSave={saveSettings}
         />
       )}
     </main>

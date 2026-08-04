@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 
 type Rule = {
   keywords: string[];
@@ -16,21 +16,31 @@ type HandoffTabProps = {
 };
 
 export default function HandoffTab({ rule, setRule, onSave }: HandoffTabProps) {
+  // Estado local para el texto tal cual se escribe: si el input mostrara
+  // rule.keywords.join(", ") directamente, cada coma o espacio se "comía" al instante
+  // porque el onChange recalculaba el arreglo (filtrando vacíos) y eso volvía a pintar
+  // el input ya "limpio" en cada tecla. El arreglo (lo que se guarda) sigue
+  // actualizándose en cada cambio; solo el texto visible queda desacoplado de él.
+  const [keywordsText, setKeywordsText] = useState(rule.keywords.join(", "));
+
+  const handleKeywordsChange = (value: string) => {
+    setKeywordsText(value);
+    setRule({
+      ...rule,
+      keywords: value
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    });
+  };
+
   return (
     <form className="card" onSubmit={onSave}>
       <h2>Reglas de Escalación y Derivación a Humano</h2>
       <label>Palabras Clave de Traspaso (Separadas por coma)</label>
       <input
-        value={rule.keywords.join(", ")}
-        onChange={(e) =>
-          setRule({
-            ...rule,
-            keywords: e.target.value
-              .split(",")
-              .map((x) => x.trim())
-              .filter(Boolean),
-          })
-        }
+        value={keywordsText}
+        onChange={(e) => handleKeywordsChange(e.target.value)}
       />
       <label>Máximo de Intentos Fallidos del Bot</label>
       <input

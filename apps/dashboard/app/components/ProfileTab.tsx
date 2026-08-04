@@ -1,5 +1,7 @@
 "use client";
 
+import { FormEvent } from "react";
+
 type SettingsData = {
   business_hours_enabled: boolean;
   business_hours: any;
@@ -12,15 +14,17 @@ type ProfileTabProps = {
   companyId: string;
   settingsData: SettingsData;
   setSettingsData: (settings: SettingsData) => void;
+  onSave: (e: FormEvent) => void;
 };
 
 export default function ProfileTab({
   companyId,
   settingsData,
   setSettingsData,
+  onSave,
 }: ProfileTabProps) {
   return (
-    <section className="card">
+    <form className="card" onSubmit={onSave}>
       <h2>Perfil de la Empresa & Configuración de Cuenta</h2>
       <div className="form-grid">
         <div>
@@ -44,6 +48,7 @@ export default function ProfileTab({
           </select>
         </div>
       </div>
-    </section>
+      <button style={{ marginTop: 20 }}>Guardar Configuración</button>
+    </form>
   );
 }
