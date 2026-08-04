@@ -139,7 +139,13 @@ async def list_conversations(principal: Principal = Depends(require_principal)):
         conversations = await conn.fetch("select * from conversations where company_id=$1 order by last_message_at desc limit 100", principal.company_id)
         result = []
         for row in conversations:
-            messages = await conn.fetch("select direction, content, created_at from messages where conversation_id=$1 order by created_at asc limit 50", row["id"])
+            messages = await conn.fetch(
+                """select * from (
+                     select direction, content, created_at from messages
+                     where conversation_id=$1 order by created_at desc limit 50
+                   ) recent order by created_at asc""",
+                row["id"],
+            )
             result.append({**dict(row), "messages": [dict(m) for m in messages]})
     return result
 
