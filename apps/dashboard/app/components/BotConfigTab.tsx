@@ -136,6 +136,8 @@ export default function BotConfigTab({
               value={bot.model}
               onChange={(e) => setBot({ ...bot, model: e.target.value })}
             >
+              <option value="qwen/qwen3-30b-a3b-instruct-2507">Qwen3 30B A3B (Mejor calidad/precio)</option>
+              <option value="openai/gpt-oss-120b">GPT-OSS 120B (El más económico)</option>
               <option value="deepseek/deepseek-chat">DeepSeek V3 (Económico / Rápido)</option>
               <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 72B (Alta precisión)</option>
               <option value="moonshotai/kimi-k2.5">Kimi K2.5 (Contexto largo, económico)</option>
