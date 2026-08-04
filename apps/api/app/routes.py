@@ -194,7 +194,14 @@ async def send_manual_message(conversation_id: str, payload: ManualMessageCreate
 
     async with tenant_conn(principal.company_id) as conn:
         msg = await save_message(conn, principal.company_id, conv["id"], "outbound", payload.content)
-        await conn.execute("update conversations set last_message_at=now() where id=$1", conv["id"])
+        # Un mensaje manual del dueño/equipo es tomar control humano de la conversación:
+        # pasa a 'handoff' para que el bot deje de responder automáticamente hasta que
+        # se reactive a mano. Antes esto solo se decía en la UI (InboxTab) pero nunca se
+        # aplicaba de verdad -- el mensaje se mandaba y la conversación seguía en modo IA.
+        await conn.execute(
+            "update conversations set status='handoff', last_message_at=now(), failed_reply_count=0 where id=$1",
+            conv["id"],
+        )
     return dict(msg)
 
 
