@@ -66,10 +66,13 @@ export default function InboxTab({
 
   const activeConv = conversations.find((c) => c.id === selectedId);
 
-  // Auto scroll to bottom of chat when new message arrives or selection changes
+  // Auto scroll to bottom solo cuando realmente hay un mensaje nuevo (cambia la
+  // cantidad) o se selecciona otra conversación -- no en cada refresco del polling del
+  // Inbox (cada 4s), que trae un arreglo nuevo aunque el contenido no haya cambiado y
+  // antes disparaba un scroll de igual forma, empujando la página hacia abajo sola.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeConv?.messages]);
+  }, [activeConv?.messages?.length, selectedId]);
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();

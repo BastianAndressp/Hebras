@@ -18,6 +18,7 @@ class HandoffRuleUpdate(BaseModel):
     keywords: list[str] = Field(default_factory=list, max_length=30)
     max_bot_attempts: int = Field(default=2, ge=1, le=10)
     notification_email: str | None = None
+    ai_handoff_phrase: str | None = Field(default=None, max_length=300)
 
 
 class BotResponse(BotUpdate):

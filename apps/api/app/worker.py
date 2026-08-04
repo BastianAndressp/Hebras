@@ -92,6 +92,20 @@ async def process(payload: dict) -> None:
             await save_message(conn, bot["company_id"], conversation["id"], "outbound", reply, tokens=tokens, cost=cost)
             await conn.execute("insert into usage(company_id, period_start, messages_count, tokens_count, cost_usd) values($1,date_trunc('month',now()),1,$2,$3) on conflict(company_id,period_start) do update set messages_count=usage.messages_count+1,tokens_count=usage.tokens_count+excluded.tokens_count,cost_usd=usage.cost_usd+excluded.cost_usd", bot["company_id"], tokens, cost)
 
+            # Distinto de should_handoff (que mira el mensaje ENTRANTE del cliente):
+            # esto detecta cuando la propia respuesta de la IA anuncia que deriva a un
+            # humano (frase configurable por bot en handoff_rules.ai_handoff_phrase), y
+            # recién ahí -- después de generar y mandar esa respuesta -- marca la
+            # conversación como handoff.
+            ai_handoff_phrase = await conn.fetchval(
+                "select ai_handoff_phrase from handoff_rules where bot_id=$1", bot["id"]
+            )
+            if ai_handoff_phrase and ai_handoff_phrase.lower() in reply.lower():
+                log.info("AI reply matched ai_handoff_phrase, marking conversation_id=%s as handoff", conversation["id"])
+                await conn.execute("update conversations set status='handoff', last_message_at=now() where id=$1", conversation["id"])
+                email = await conn.fetchval("select notification_email from handoff_rules where bot_id=$1", bot["id"])
+                await notify_handoff(email, payload["contact_phone"], payload["text"])
+
     except Exception:
         log.exception("Message processing failed for meta_message_id=%s", payload.get("meta_message_id"))
         raise

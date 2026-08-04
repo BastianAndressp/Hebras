@@ -40,6 +40,7 @@ type Rule = {
   keywords: string[];
   max_bot_attempts: number;
   notification_email?: string;
+  ai_handoff_phrase?: string | null;
 };
 
 type DocumentRow = {

@@ -115,8 +115,8 @@ async def update_bot(payload: BotUpdate, bot_id: str | None = Query(default=None
 async def read_handoff_rule(bot_id: str | None = Query(default=None), principal: Principal = Depends(require_principal)):
     async with tenant_conn(principal.company_id) as conn:
         bot = await get_bot(conn, principal.company_id, bot_id)
-        rule = await conn.fetchrow("select keywords, max_bot_attempts, notification_email from handoff_rules where bot_id=$1", bot["id"])
-    return dict(rule) if rule else {"keywords": [], "max_bot_attempts": 2, "notification_email": None}
+        rule = await conn.fetchrow("select keywords, max_bot_attempts, notification_email, ai_handoff_phrase from handoff_rules where bot_id=$1", bot["id"])
+    return dict(rule) if rule else {"keywords": [], "max_bot_attempts": 2, "notification_email": None, "ai_handoff_phrase": None}
 
 
 @router.put("/handoff-rule")
@@ -125,10 +125,11 @@ async def update_handoff_rule(payload: HandoffRuleUpdate, bot_id: str | None = Q
     async with tenant_conn(principal.company_id) as conn:
         bot = await get_bot(conn, principal.company_id, bot_id)
         rule = await conn.fetchrow(
-            """insert into handoff_rules(company_id, bot_id, keywords, max_bot_attempts, notification_email)
-               values($1,$2,$3,$4,$5) on conflict(bot_id) do update set keywords=excluded.keywords,
-               max_bot_attempts=excluded.max_bot_attempts, notification_email=excluded.notification_email returning *""",
-            principal.company_id, bot["id"], payload.keywords, payload.max_bot_attempts, payload.notification_email)
+            """insert into handoff_rules(company_id, bot_id, keywords, max_bot_attempts, notification_email, ai_handoff_phrase)
+               values($1,$2,$3,$4,$5,$6) on conflict(bot_id) do update set keywords=excluded.keywords,
+               max_bot_attempts=excluded.max_bot_attempts, notification_email=excluded.notification_email,
+               ai_handoff_phrase=excluded.ai_handoff_phrase returning *""",
+            principal.company_id, bot["id"], payload.keywords, payload.max_bot_attempts, payload.notification_email, payload.ai_handoff_phrase)
     return dict(rule)
 
 

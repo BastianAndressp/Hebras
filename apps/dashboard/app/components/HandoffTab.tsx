@@ -6,6 +6,7 @@ type Rule = {
   keywords: string[];
   max_bot_attempts: number;
   notification_email?: string;
+  ai_handoff_phrase?: string | null;
 };
 
 type HandoffTabProps = {
@@ -49,6 +50,19 @@ export default function HandoffTab({ rule, setRule, onSave }: HandoffTabProps) {
           setRule({ ...rule, notification_email: e.target.value })
         }
       />
+      <label>Frase de Derivación de la IA</label>
+      <input
+        placeholder='Ej: "Te paso con un trabajador de Basfer para que te ayude directamente."'
+        value={rule.ai_handoff_phrase || ""}
+        onChange={(e) =>
+          setRule({ ...rule, ai_handoff_phrase: e.target.value })
+        }
+      />
+      <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+        Si la respuesta que genera la IA contiene esta frase exacta, la conversación pasa
+        automáticamente a modo Humano. Debe coincidir con lo que tu prompt le indica decir
+        a la IA cuando decide derivar. Déjalo vacío para desactivar esta regla.
+      </p>
       <button style={{ marginTop: 20 }}>Guardar Reglas de Derivación</button>
     </form>
   );
