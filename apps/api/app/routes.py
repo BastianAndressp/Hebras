@@ -158,8 +158,12 @@ async def list_conversations(principal: Principal = Depends(require_principal)):
 async def update_conversation_status(conversation_id: str, payload: ConversationStatusUpdate, principal: Principal = Depends(require_principal)):
     require_write_access(principal)
     async with tenant_conn(principal.company_id) as conn:
+        # Reactivar a mano (o cualquier cambio manual de estado) resetea el contador de
+        # fallas consecutivas -- si no, una racha vieja de fallas reales (ver migración
+        # 0012 / worker.py) seguía derivando la conversación al instante en cada mensaje
+        # nuevo, sin importar cuántas veces el dueño la reactivara.
         conv = await conn.fetchrow(
-            "update conversations set status=$1, last_message_at=now() where id=$2 and company_id=$3 returning *",
+            "update conversations set status=$1, last_message_at=now(), failed_reply_count=0 where id=$2 and company_id=$3 returning *",
             payload.status, conversation_id, principal.company_id
         )
         if not conv:

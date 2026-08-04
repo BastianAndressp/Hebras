@@ -40,17 +40,18 @@ async def test_should_handoff_on_keyword_match():
     assert result is True
 
 
-async def test_should_handoff_on_repeated_bot_attempts_without_keyword():
+async def test_should_handoff_on_repeated_failed_replies_without_keyword():
+    # conversations.failed_reply_count (migración 0012) reemplazó el escaneo de
+    # mensajes crudos: antes una racha de fallas quedaba pegada para siempre en el
+    # historial y ni reactivar la conversación la rompía.
     rule = {"keywords": [], "max_bot_attempts": 2}
-    recent = [{"direction": "inbound"}, {"direction": "inbound"}, {"direction": "outbound"}]
-    conn = FakeConn(fetchrow_result=rule, fetch_result=recent)
-    result = await should_handoff(conn, {"id": "bot-1"}, "consulta normal sobre precios", {"id": "conv-1"})
+    conn = FakeConn(fetchrow_result=rule)
+    result = await should_handoff(conn, {"id": "bot-1"}, "consulta normal sobre precios", {"id": "conv-1", "failed_reply_count": 2})
     assert result is True
 
 
-async def test_should_handoff_false_when_bot_already_replied_recently():
+async def test_should_handoff_false_when_failed_reply_count_below_threshold():
     rule = {"keywords": [], "max_bot_attempts": 2}
-    recent = [{"direction": "outbound"}, {"direction": "inbound"}]
-    conn = FakeConn(fetchrow_result=rule, fetch_result=recent)
-    result = await should_handoff(conn, {"id": "bot-1"}, "consulta normal sobre precios", {"id": "conv-1"})
+    conn = FakeConn(fetchrow_result=rule)
+    result = await should_handoff(conn, {"id": "bot-1"}, "consulta normal sobre precios", {"id": "conv-1", "failed_reply_count": 0})
     assert result is False

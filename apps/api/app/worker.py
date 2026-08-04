@@ -146,6 +146,10 @@ async def process(payload: dict) -> None:
         async with pool().acquire() as conn:
             await save_message(conn, bot["company_id"], conversation["id"], "outbound", reply, tokens=tokens, cost=cost)
             await conn.execute("insert into usage(company_id, period_start, messages_count, tokens_count, cost_usd) values($1,date_trunc('month',now()),1,$2,$3) on conflict(company_id,period_start) do update set messages_count=usage.messages_count+1,tokens_count=usage.tokens_count+excluded.tokens_count,cost_usd=usage.cost_usd+excluded.cost_usd", bot["company_id"], tokens, cost)
+            # Respuesta exitosa: resetea la racha de fallas consecutivas (ver migración
+            # 0012 / should_handoff). Sin esto, una falla vieja seguía contando para
+            # siempre incluso después de que el bot volviera a responder bien.
+            await conn.execute("update conversations set failed_reply_count=0 where id=$1", conversation["id"])
 
             # Distinto de should_handoff (que mira el mensaje ENTRANTE del cliente):
             # esto detecta cuando la propia respuesta de la IA anuncia que deriva a un
@@ -161,6 +165,17 @@ async def process(payload: dict) -> None:
 
     except Exception:
         log.exception("Message processing failed for meta_message_id=%s", payload.get("meta_message_id"))
+        # Cuenta esta falla para el detector de intentos fallidos (ver migración 0012 /
+        # should_handoff) -- en una conexión aparte, ya que la excepción pudo haber
+        # dejado la transacción/conexión original en mal estado.
+        try:
+            async with pool().acquire() as fail_conn:
+                await fail_conn.execute(
+                    "update conversations set failed_reply_count = failed_reply_count + 1 where id=$1",
+                    conversation["id"],
+                )
+        except Exception:
+            log.exception("No se pudo incrementar failed_reply_count para conversation_id=%s", conversation["id"])
         raise
 
 

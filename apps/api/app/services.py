@@ -103,11 +103,14 @@ async def should_handoff(conn, bot, text: str, conversation) -> bool:
     keywords = {term.lower() for term in (rule["keywords"] or [])} | HANDOFF_TERMS
     if any(term in text.lower() for term in keywords):
         return True
-    recent = await conn.fetch(
-        "select direction from messages where conversation_id=$1 order by created_at desc limit $2",
-        conversation["id"], rule["max_bot_attempts"] + 1
-    )
-    if len(recent) >= rule["max_bot_attempts"] and all(m["direction"] == "inbound" for m in recent[:rule["max_bot_attempts"]]):
+    # conversations.failed_reply_count cuenta fallas reales consecutivas (worker.py lo
+    # incrementa cuando generate_reply/send_whatsapp falla, y lo resetea a 0 apenas el
+    # bot responde con éxito o el dueño reactiva la conversación a mano). Antes esto
+    # escaneaba el historial crudo buscando "los últimos N mensajes son todos entrantes",
+    # lo que quedaba pegado para siempre tras una falla real: el chequeo corre ANTES de
+    # intentar responder, así que ni reactivar rompía la racha -- cada mensaje nuevo solo
+    # la extendía y volvía a derivar al instante, sin que el bot llegara a reintentar.
+    if conversation["failed_reply_count"] >= rule["max_bot_attempts"]:
         return True
     return False
 

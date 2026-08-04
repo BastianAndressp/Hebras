@@ -1,0 +1,12 @@
+-- should_handoff detectaba "el bot falló N veces seguidas" escaneando si los últimos N
+-- mensajes eran todos entrantes, sin ningún contador que se pudiera resetear. Cuando una
+-- falla real (ej. la API key de OpenRouter inválida) dejaba varios mensajes sin
+-- respuesta, esa racha quedaba pegada en el historial para siempre: el chequeo corre
+-- ANTES de intentar responder, así que ni reactivar manualmente la conversación podía
+-- romperla -- cada mensaje nuevo del cliente solo extendía la misma racha vieja y volvía
+-- a derivar al instante, sin que el bot llegara nunca a intentar responder de nuevo.
+--
+-- Este contador reemplaza ese escaneo de historial: se resetea a 0 cada vez que el bot
+-- responde con éxito, y cada vez que el dueño reactiva la conversación manualmente desde
+-- el dashboard -- así el estado realmente se puede recuperar.
+alter table conversations add column if not exists failed_reply_count int not null default 0;
